@@ -1,0 +1,180 @@
+---
+title: "Project"
+output: pdf_document
+---
+Written By Chee Kit Tang (ct2819)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=6, fig.height=4) 
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(1000)
+library(GEOquery)
+library(Biobase)
+library(limma)
+library(dplyr)
+library(scatterplot3d)
+library("factoextra")
+
+#####load series and platform data from GEO#####
+gset <- getGEO("GSE55924", GSEMatrix =TRUE, AnnotGPL=TRUE)
+if (length(gset) > 1) idx <- grep("GPL10558", attr(gset, "names")) else idx <- 1
+gset <- gset[[idx]]
+```
+
+
+```{r ReplicatingResults}
+#####Group samples data such that G0-baseline,G1-4h,G2-10h,G3-24h#####
+# make proper column names to match toptable 
+fvarLabels(gset) <- make.names(fvarLabels(gset))
+# group names for all samples
+gsms <- "012301230123012301230123012301230123012301230123"
+sml <- c()
+for (i in 1:nchar(gsms)) { sml[i] <- substr(gsms,i,i) }
+
+#####Set up the data and proceed with analysis#####
+sml <- paste("G", sml, sep="")    # set group names
+fl <- as.factor(sml)
+gset$description <- fl
+design <- model.matrix(~ description + 0, gset)
+colnames(design) <- levels(fl)
+fit <- lmFit(gset, design)
+cont.matrix <- makeContrasts(G2-G0,G3-G0, levels=design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+#####Show distribution and normalization#####
+par(mfrow=c(1,1))
+hist(exprs(gset))
+#Order samples by group
+ex <- exprs(gset)[ , order(sml)]
+sml <- sml[order(sml)]
+fl <- as.factor(sml)
+labels <- c("1h","4h","10h","24h")
+# set parameters and draw the plot
+palette(c("#dfeaf4","#f4dfdf","#f2cb98","#dfeaf4", "#AABBCC"))
+par(mfrow=c(1,1))
+title <- paste ("GSE55924", '/', annotation(gset), "samples", sep ='')
+boxplot(ex, boxwex=0.6, notch=T, main=title, outline=FALSE, las=2, col=fl)
+legend("topleft", labels, fill=palette(), bty="n")
+
+#####Find Top 10 up and downregulated genes during 10h and 24h #####
+tT <- topTable(fit2,coef=1, adjust="none", sort.by="logFC",resort.by="logFC", number=Inf,p.value=0.05,lfc=0.25)
+tT <- subset(tT, select=c("ID","P.Value","t","B","logFC","Gene.symbol","Gene.title"))
+tT2 <- topTable(fit2,coef=2, adjust="none", sort.by="logFC",resort.by="logFC", number=Inf,p.value=0.05,lfc=0.25)
+tT2 <- subset(tT2, select=c("ID","P.Value","t","B","logFC","Gene.symbol","Gene.title"))
+len_tT=dim(tT)[1]
+tT[1:10,]
+tT[(len_tT-9):len_tT,]
+len_tT2=dim(tT2)[1]
+tT2[1:10,]
+tT2[(len_tT2-9):len_tT2,]
+
+#####Comparing validation of microarray result##### 
+tTFull <- topTable(fit2,coef=1, adjust="none", sort.by="logFC",resort.by="logFC", number=Inf)
+tTFull <- subset(tTFull,select=c("ID","P.Value","t","B","logFC","Gene.symbol","Gene.title"))
+tT2Full <- topTable(fit2,coef=2, adjust="none", sort.by="logFC",resort.by="logFC", number=Inf)
+tT2Full <- subset(tT2Full,select=c("ID","P.Value","t","B","logFC","Gene.symbol","Gene.title"))
+
+genes_ID<-c('ILMN_1707727','ILMN_1663092','ILMN_2052208','ILMN_1684982','ILMN_1660847','ILMN_1697448','ILMN_1750521','ILMN_1724162','ILMN_1704629')
+
+tTFull[genes_ID,]
+tT2Full[genes_ID,]
+#####Comparing some of the genes result##### 
+genes_symbol<-c('FOXO1','SIRT1','HDAC4','NDUFB8','SDHB','UQCRC2')
+genes_ID<-c('ILMN_1738816','ILMN_1739083','ILMN_1764396','ILMN_1661170','ILMN_1667257','ILMN_1718853')
+x<-c(1.5,10,24)
+par(mfrow=c(1,3))
+for(i in 1:6){
+  if(i==4){
+    par(mfrow=c(1,3))
+  }
+  y<-c(100,100*2^-abs(tTFull[genes_ID[i],'logFC']),100*2^-abs(tT2Full[genes_ID[i],'logFC']))
+  plot(x,y, xlim=c(0,24),ylim=c(0,150),main=genes_symbol[i],xlab='Time',ylab='a.u.')
+  lines(x,y,lty='dotted')
+}
+
+```
+
+
+```{r newAnalysis}
+# calculate a distance matrix between each sample (each array)
+dst <- dist(t(exprs(gset)))
+# Hierarchical cluster analysis on above distance matrix
+titleList<-c('Hierarchical Clustering-Average','Hierarchical Clustering-Maximum','Hierarchical Clustering-Minimum')
+methodList<-c("average","complete","single")
+hhLabel<-NULL
+for(i in 1:12){
+  for(j in 1:4){
+    hhLabel<-c(hhLabel,paste(c('S',i,'G',j), collapse = ""))
+  }
+}
+for(i in 1:3){
+hh <- hclust(dst, method=methodList[i])
+# We will plot both of them on the same plot
+par(mfrow=c(1,2))
+par(mfrow=c(1,2))
+# plot default is by sample name
+plot(hh,main=titleList[i])
+
+# label sample by group
+plot(hh, label=hhLabel,main=titleList[i])
+}
+
+for (i in 1:nchar(gsms)) { sml[i] <- substr(gsms,i,i) }
+PC=prcomp(t(exprs(gset)))
+fviz_eig(PC, addlabels=TRUE)
+fviz_pca_ind(PC,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+fviz_pca_ind(PC, label="none",habillage=sml)
+fviz_pca_ind(PC, label="none",habillage=sml,
+             addEllipses=TRUE, ellipse.level=0.9)
+scores = predict(PC)
+
+# extract PC1, PC2 and PC3
+pc1 <- scores[ ,1]
+pc2 <- scores[ ,2]
+pc3 <- scores[ ,3]
+shape <- as.numeric(fl) + 14 #add 14 so that it will has fill
+par(mfrow=c(1,1))
+plot(pc1, pc2, col=fl, pch=shape, cex=2)
+legend("bottomright",col=fl, pch=unique(shape), paste(unique(fl)))
+
+par(mfrow=c(1,1))
+scatterplot3d(pc1, pc2, pc3, xlab="PC1", ylab="PC2", zlab="PC3", pch=shape, color=as.numeric(fl), main="3D PCA", cex.symbols=2.0, angle=40)
+# Define p-value cut-off
+p_cutoff <- 0.05
+# Calculate the number of genes
+numGenes <- nrow(exprs(gset))
+
+#Plot MA for D3-DO
+completeTopTable <- topTable(fit2,coef=2, adjust="none", number=numGenes)
+completeTopTable<-completeTopTable[order(completeTopTable$ID,method='radix'),]
+
+
+selected <- completeTopTable$adj.P.Val <= p_cutoff & (completeTopTable$logFC>=0.25 | completeTopTable$logFC<=(-0.25))
+
+status <- character (length=numGenes)
+status <- rep ("Unchanged Genes", numGenes)
+names (status) <- seq (1, numGenes, 1)
+status [selected] <- "Significant Changed Genes"
+
+limma::plotMA(fit2[,2], status=status, values=c("Unchanged Genes", "Significant Changed Genes"), col=c("blue","red"), pch=c(46,46))
+text(x=12, y=9, labels=paste("P = ", p_cutoff), col="black", font=2)
+
+#Plot MA for D2-DO
+completeTopTable <- topTable(fit2,coef=1, adjust="none", number=numGenes)
+completeTopTable<-completeTopTable[order(completeTopTable$ID,method='radix'),]
+
+selected <- completeTopTable$adj.P.Val <= p_cutoff & (completeTopTable$logFC>=0.25 | completeTopTable$logFC<=(-0.25))
+
+status <- character (length=numGenes)
+status <- rep ("Unchanged Genes", numGenes)
+names (status) <- seq (1, numGenes, 1)
+status [selected] <- "Significant Changed Genes"
+
+limma::plotMA(fit2[,1], status=status, values=c("Unchanged Genes", "Significant Changed Genes"), col=c("blue","red"), pch=c(46,46))
+text(x=12, y=9, labels=paste("P = ", p_cutoff), col="black", font=2)
+```
+
